@@ -1,0 +1,8 @@
+GasGiant goes at 0,0,0 with size of 10,10,10
+Moon goes at 50,0,0
+
+PlanetaryGravity goes on GasGiant
+OrbitalVelocity goes on Moon
+CamerFollow goes on Moons child camera
+
+PhysicsConstraints sits in same folder as other scripts
