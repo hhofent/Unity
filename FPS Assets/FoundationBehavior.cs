@@ -1,93 +1,128 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-// Manages the foundation’s grid system for snapping and placement.
 public class FoundationBehavior : MonoBehaviour
 {
-    // Grid dimensions in 1/4-inch increments, accessible for other scripts.
     public int gridWidth { get; private set; }
     public int gridHeight { get; private set; }
-    // Size of each grid cell (1/4 inch).
-    private float cellSize = 0.25f;
-    // Tracks occupied grid points to prevent overlapping placements.
+    private float cellSize = 0.00635f; // 1/4 inch
     private bool[,] occupancyGrid;
-    // Maps grid coordinates to world positions for snapping.
     public Dictionary<Vector2Int, Vector3> gridWorldPositions;
-    // Bounds of the foundation for positioning calculations.
-    private Bounds foundationBounds;
+    private Bounds bounds;
+    private Dictionary<Vector2Int, GameObject> pencilMarks;
+    public GameObject pencilMarkPrefab;
+    private Dictionary<Vector2Int, TextMesh> dimensionTexts;
 
-    // Initializes the foundation’s grid and snaps to terrain.
     void Start()
     {
-        // Get the renderer to calculate bounds for grid positioning.
-        Renderer renderer = GetComponent<Renderer>();
-        if (renderer == null)
+        Renderer rend = GetComponent<Renderer>();
+        if (!rend) { Debug.LogError("Foundation missing Renderer!", gameObject); return; }
+        bounds = rend.bounds;
+
+        Vector3 scale = transform.localScale;
+        gridWidth = Mathf.CeilToInt(scale.x / cellSize);
+        gridHeight = Mathf.CeilToInt(scale.z / cellSize);
+
+        const int maxGridSize = 1000;
+        if (gridWidth > maxGridSize || gridHeight > maxGridSize)
         {
-            Debug.LogError("Foundation missing Renderer component!", gameObject);
-            return;
+            Debug.LogError($"Grid size too large: {gridWidth}x{gridHeight}. Check scale: {scale}.");
+            gridWidth = Mathf.Min(gridWidth, maxGridSize);
+            gridHeight = Mathf.Min(gridHeight, maxGridSize);
         }
-        foundationBounds = renderer.bounds;
 
-        // Calculate grid size based on foundation scale (4 cells per inch).
-        Vector3 foundationScale = transform.localScale;
-        gridWidth = Mathf.CeilToInt(foundationScale.x * 4f);
-        gridHeight = Mathf.CeilToInt(foundationScale.z * 4f);
+        Debug.Log($"Grid Size: {gridWidth}x{gridHeight}, Foundation Scale: {scale}");
 
-        // Initialize data structures for grid and occupancy.
         occupancyGrid = new bool[gridWidth, gridHeight];
         gridWorldPositions = new Dictionary<Vector2Int, Vector3>();
+        pencilMarks = new Dictionary<Vector2Int, GameObject>();
+        dimensionTexts = new Dictionary<Vector2Int, TextMesh>();
 
-        // Populate grid world positions for snapping.
-        for (int x = 0; x < gridWidth; x++)
-        {
-            for (int y = 0; y < gridHeight; y++)
-            {
-                Vector3 localPos = GetLocalPosition(x, y);
-                Vector3 worldPos = transform.TransformPoint(localPos);
-                gridWorldPositions[new Vector2Int(x, y)] = worldPos;
-            }
-        }
-
-        // Snap foundation to terrain height for proper alignment.
         Terrain terrain = FindObjectOfType<Terrain>();
-        if (terrain != null)
+        if (terrain)
         {
             Vector3 pos = transform.position;
-            pos.y = terrain.SampleHeight(pos) + terrain.transform.position.y + (foundationScale.y / 2f);
+            pos.y = terrain.SampleHeight(pos) + terrain.transform.position.y + (scale.y / 2f);
             transform.position = pos;
         }
-
-        Debug.Log($"Foundation initialized: Scale {foundationScale}, Grid {gridWidth}x{gridHeight}, Cell Size: {cellSize}");
     }
 
-    // Calculates the local position for a grid point relative to the foundation’s center.
     private Vector3 GetLocalPosition(int x, int y)
     {
-        // Center the grid by offsetting from the middle and scale by cell size.
         float localX = (x - (gridWidth - 1) / 2f) * cellSize;
         float localZ = (y - (gridHeight - 1) / 2f) * cellSize;
-        // Place on top surface with slight offset to avoid z-fighting.
-        float localY = (foundationBounds.size.y / transform.localScale.y / 2f) + 0.05f;
+        float localY = (bounds.size.y / transform.localScale.y / 2f) + 0.0127f; // 1/2 inch
         return new Vector3(localX, localY, localZ);
     }
 
-    // Checks if a grid point is available for placement (not occupied).
     public bool CanPlaceObject(int x, int y)
     {
         if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) return false;
         return !occupancyGrid[x, y];
     }
 
-    // Snaps a world position to the nearest grid point on the foundation.
     public Vector3 GetNearestGridPoint(Vector3 worldPos)
     {
-        // Convert world position to local space and calculate grid coordinates.
         Vector3 localPos = transform.InverseTransformPoint(worldPos);
         int x = Mathf.RoundToInt(localPos.x / cellSize + (gridWidth - 1) / 2f);
         int y = Mathf.RoundToInt(localPos.z / cellSize + (gridHeight - 1) / 2f);
-        // Clamp to grid bounds to prevent out-of-range access.
         x = Mathf.Clamp(x, 0, gridWidth - 1);
         y = Mathf.Clamp(y, 0, gridHeight - 1);
-        return gridWorldPositions[new Vector2Int(x, y)];
+        Vector2Int gridPoint = new Vector2Int(x, y);
+
+        if (!gridWorldPositions.ContainsKey(gridPoint))
+        {
+            Vector3 localGridPos = GetLocalPosition(x, y);
+            gridWorldPositions[gridPoint] = transform.TransformPoint(localGridPos);
+            Debug.Log($"Generated grid point ({x}, {y}) at {gridWorldPositions[gridPoint]}");
+        }
+        return gridWorldPositions[gridPoint];
+    }
+
+    public void PlacePencilMark(Vector2Int gridPoint)
+    {
+        if (!pencilMarks.ContainsKey(gridPoint))
+        {
+            if (pencilMarkPrefab == null)
+            {
+                Debug.LogError("PencilMarkPrefab is not assigned!", this);
+                return;
+            }
+            Vector3 worldPos = gridWorldPositions[gridPoint];
+            GameObject mark = Instantiate(pencilMarkPrefab, worldPos, Quaternion.identity, transform);
+            mark.transform.localRotation = Quaternion.Euler(0, 0, 90); // Align with X-axis
+            pencilMarks[gridPoint] = mark;
+        }
+    }
+
+    public void PlaceDimensionText(Vector2Int point1, Vector2Int point2, float length, int locationNumber)
+    {
+        Vector3 pos1 = gridWorldPositions[point1];
+        Vector3 pos2 = gridWorldPositions[point2];
+        Vector3 midPoint = (pos1 + pos2) / 2f + Vector3.up * 0.0254f;
+
+        GameObject textObj = new GameObject("DimensionText");
+        textObj.transform.SetParent(transform, false);
+        textObj.transform.position = midPoint;
+        textObj.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+
+        TextMesh text = textObj.AddComponent<TextMesh>();
+        float lengthInInches = length * 39.3701f;
+        text.text = $"Location {locationNumber}: {lengthInInches:F2} inches";
+        text.fontSize = 50;
+        text.color = Color.white;
+        text.anchor = TextAnchor.MiddleCenter;
+        text.characterSize = 0.00254f;
+
+        dimensionTexts[point1] = text;
+        dimensionTexts[point2] = text;
+    }
+
+    public void ClearPencilMarks()
+    {
+        foreach (var mark in pencilMarks.Values) Destroy(mark);
+        pencilMarks.Clear();
+        foreach (var text in new HashSet<TextMesh>(dimensionTexts.Values)) Destroy(text.gameObject);
+        dimensionTexts.Clear();
     }
 }
