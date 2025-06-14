@@ -57,8 +57,6 @@ public class PlayerMovement : MonoBehaviour
             (controller.height / 2) + 0.1f // Fixed from (controller.height / 2) + -0.1f
         );
 
-        Debug.Log($"isGrounded: {isGrounded}, isReaching: {isReaching}, isSprinting: {isSprinting}");
-
         Look();
         Move();
     }
